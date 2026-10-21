@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 import {
   COMMENT_MAX_LENGTH,
@@ -9,6 +12,17 @@ import {
   validateContent,
   validatePost,
 } from '../src/validate.js'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const mainSource = readFileSync(join(here, '..', 'src', 'main.jsx'), 'utf8')
+
+test('the API base is configurable for production deployments', () => {
+  assert.match(
+    mainSource,
+    /import\.meta\.env\.VITE_API_URL\s*\|\|\s*'\/api'/,
+    'main.jsx must fall back to the relative /api path when VITE_API_URL is unset',
+  )
+})
 
 test('empty submissions are rejected', () => {
   assert.match(validatePost(''), /empty/i)

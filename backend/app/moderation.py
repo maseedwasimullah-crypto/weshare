@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import re
 import threading
 import unicodedata
@@ -38,7 +38,9 @@ def load_blocked_terms(path: Path | None = None) -> list[str]:
     terms: list[str] = []
     if target.exists():
         try:
-            raw = target.read_text(encoding="utf-8")
+            # utf-8-sig strips a byte order mark, which would otherwise turn
+            # the first comment line into a blocked term.
+            raw = target.read_text(encoding="utf-8-sig")
         except OSError:
             logger.warning("Could not read blocked terms file: %s", target)
             raw = ""

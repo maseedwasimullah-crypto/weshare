@@ -55,6 +55,12 @@ Then edit `.env`:
 
 `.env` is ignored by git. Never commit real credentials.
 
+The frontend has its own build-time variables in `frontend/.env.example`:
+
+| Variable | Meaning |
+| --- | --- |
+| `VITE_API_URL` | Absolute origin of the deployed API. Leave unset locally: the browser then calls `/api` and the Vite dev server proxies it to the backend. Set it in production, for example `https://weshare-api.onrender.com`. Vite inlines `VITE_` variables at build time, so changing it requires a rebuild. |
+
 ## 4. Installation
 
 ```powershell
@@ -228,23 +234,117 @@ cd frontend
 npm test
 ```
 
-## 13. Production deployment
+## 13. Deployment
 
-1. Build the frontend: `cd frontend; npm run build` and serve `frontend/dist`
-   from a static host.
-2. Run the API from the `backend` directory:
-   `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
-3. Set `FRONTEND_ORIGIN` to the exact frontend origin, enable HTTPS, set
-   `COOKIE_SECURE=true`, and keep secrets in the deployment secret manager.
-4. Provision PostgreSQL, run `alembic -c alembic.ini upgrade head` before the
-   app starts, configure SMTP, and put a reverse proxy with TLS in front.
-5. The current API has no distributed login rate limiter, no password-reset
-   flow and no robust token revocation; add those before a public launch. The
-   included login throttle is per-process and in-memory, and is not claimed to
-   be a distributed limiter.
+The project has two deployable parts and one database:
+
+| Part | Type | Runs |
+| --- | --- | --- |
+| `backend/` | FastAPI (ASGI) | uvicorn `app.main:app` |
+| `frontend/` | React/Vite static SPA | a static host serves `frontend/dist` |
+| PostgreSQL | database | managed Postgres |
+
+The frontend calls `/api/...` relative to its own origin by default, so the two
+halves must be connected. The recommended setup below uses Render for the API
+and the database, and Vercel for the static frontend.
+
+### 13.1 Backend and database on Render (one click)
+
+`render.yaml` in the repository root is a Render Blueprint. It provisions the
+PostgreSQL instance and the API web service together.
+
+1. Open <https://render.com/deploy?repo=https://github.com/maseedwasimullah-crypto/weshare>
+2. Sign in to Render with the same GitHub account, and grant Render access to
+   the **private** `weshare` repository.
+3. Render shows the blueprint. Fill in the values marked `sync: false`:
+   * `FRONTEND_ORIGIN` — the exact origin of the deployed frontend, for
+     example `https://weshare.vercel.app` (no trailing slash). This is the
+     CORS origin, so it must match the browser exactly.
+   * `EMAIL_HOST`, `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM` — SMTP
+     credentials. **SMTP is mandatory in production**: without it no account
+     can be activated.
+4. Click **Apply**. Render builds the service and creates the database.
+
+What the Blueprint does and why:
+
+* `rootDir` is deliberately left at the repository root. `backend/app/config.py`
+  locates `moderation/blocked_terms.txt` relative to the repository root. If
+  the backend were the build root, that file would fall outside the build and
+  the block list would silently load empty. The start command therefore
+  changes into `backend/` at run time.
+* `SECRET_KEY` uses `generateValue: true`, so Render creates a random secret
+  and stores it encrypted. The API refuses to start without a `SECRET_KEY` of
+  at least 32 characters.
+* `DATABASE_URL` is injected from the attached database. Managed providers
+  hand out a plain `postgresql://` URL, which SQLAlchemy would map to
+  psycopg2; the application rewrites the scheme to `postgresql+psycopg://`
+  unless an explicit driver is present.
+
+### 13.2 Frontend on Vercel
+
+1. Open <https://vercel.com/new> and import the `weshare` repository (grant
+   Vercel access to the private repo).
+2. Project settings:
+   * **Root Directory**: `frontend`
+   * **Framework Preset**: Vite
+   * **Build Command**: `npm run build`
+   * **Output Directory**: `dist`
+3. Settings → Environment Variables, add:
+
+   | Name | Value |
+   | --- | --- |
+   | `VITE_API_URL` | `https://weshare-api.onrender.com` |
+
+   `VITE_` variables are inlined at **build** time, so redeploy after changing
+   the value.
+4. Deploy. Note the resulting origin, for example
+   `https://weshare-abc123.vercel.app`, and set it as `FRONTEND_ORIGIN` on the
+   Render service, then trigger a redeploy there.
+
+Netlify and Cloudflare Pages work the same way: set the base directory to
+`frontend`, the build command to `npm run build`, the publish directory to
+`frontend/dist`, and define `VITE_API_URL`.
+
+### 13.3 Database migrations
+
+`backend/alembic.ini` uses a relative `script_location`, so migrations must
+run from inside `backend/`:
+
+```bash
+cd backend && alembic -c alembic.ini upgrade head
+```
+
+Run it from the Render service **Shell** tab, or from a machine that can reach
+the database. On first boot the API also calls `Base.metadata.create_all()`,
+which creates missing tables but never alters existing ones, so run the
+migration before the first schema change.
+
+### 13.4 Other platforms
+
+The backend needs a long-lived ASGI server, a migration step and a reachable
+PostgreSQL, so it suits Render, Fly.io, Railway, Azure App Service, Google
+Cloud Run, AWS App Runner or ECS Fargate, and DigitalOcean App Platform.
+Serverless platforms that only run short-lived functions (Vercel Functions,
+Netlify Functions, Cloudflare Workers) are a poor fit.
+
+The frontend is a static build and suits Vercel, Netlify, Cloudflare Pages,
+Render Static Sites, AWS S3 + CloudFront, or GitHub Pages at a root domain.
+
+### 13.5 Production checklist
+
+* HTTPS everywhere and `COOKIE_SECURE=true`.
+* `DEV_VERIFICATION_TOKENS=false` and working SMTP. Both together are
+  required: with SMTP missing and the flag off, no account can be activated;
+  with SMTP missing and the flag on, the verification token is returned in the
+  API response.
+* `SECRET_KEY` supplied by the platform secret manager, never in the repo.
+* The login throttle is per-process and in-memory; it is not a distributed
+  rate limiter. There is also no password-reset flow and no server-side token
+  revocation. Add those before a public launch.
 
 Pushing the source to GitHub does **not** deploy the site. Deployment to any
 hosting provider has to be performed separately and deliberately.
+
 
 ## 14. Project layout
 
@@ -264,9 +364,11 @@ frontend/
     main.jsx         React application
     validate.js      client side validation rules
     style.css        styling
+  .env.example      frontend build-time variables
   tests/             node:test validation suite
 moderation/
   blocked_terms.txt  administrator maintained block list
 scripts/
   promote_admin.py   interactive administrator promotion
+render.yaml          Render blueprint: API service + PostgreSQL
 ```

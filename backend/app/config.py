@@ -1,5 +1,6 @@
-﻿from pathlib import Path
+from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,21 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def default_to_psycopg3(cls, value: str) -> str:
+        """Use the psycopg 3 driver unless an explicit driver was requested.
+
+        Managed Postgres providers (Render, Neon, Supabase, Railway) hand out
+        a plain ``postgresql://`` URL. SQLAlchemy maps that to psycopg2, which
+        is not installed, so the connection would fail with "No module named
+        psycopg2". Rewrite the scheme unless the URL already names a driver.
+        """
+        for prefix in ("postgresql://", "postgres://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
 
     @property
     def blocked_terms_path(self) -> Path:

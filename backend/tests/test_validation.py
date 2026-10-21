@@ -1,6 +1,33 @@
 import pytest
 
+from app.config import Settings
 from app.moderation import ContentRejected, load_blocked_terms, moderate, validate_text
+
+
+def test_database_url_defaults_to_psycopg3():
+    """Managed Postgres providers hand out a plain postgresql:// URL."""
+    assert (
+        Settings(database_url="postgresql://u:p@host:5432/db").database_url
+        == "postgresql+psycopg://u:p@host:5432/db"
+    )
+    assert (
+        Settings(database_url="postgres://u:p@host:5432/db").database_url
+        == "postgresql+psycopg://u:p@host:5432/db"
+    )
+
+
+def test_database_url_keeps_an_explicit_driver():
+    assert (
+        Settings(database_url="postgresql+psycopg://u:p@host/db").database_url
+        == "postgresql+psycopg://u:p@host/db"
+    )
+    assert (
+        Settings(database_url="postgresql+psycopg2://u:p@host/db").database_url
+        == "postgresql+psycopg2://u:p@host/db"
+    )
+    assert (
+        Settings(database_url="sqlite:///./test.db").database_url == "sqlite:///./test.db"
+    )
 
 
 def test_text_validation():
@@ -59,6 +86,20 @@ def test_moderation_ignores_comments_and_blank_lines_in_block_list(use_blocked_t
     assert "forbiddenterm" in terms
     assert "# comment line" not in terms
     assert "" not in terms
+
+
+def test_block_list_with_a_byte_order_mark_does_not_become_a_term(tmp_path, monkeypatch):
+    """A BOM in blocked_terms.txt must not turn the first comment into a term."""
+    from app.config import settings
+
+    path = tmp_path / "blocked_terms.txt"
+    path.write_bytes("\ufeff# a comment line\nsecondterm\n".encode("utf-8"))
+    monkeypatch.setattr(settings, "moderation_blocked_terms_file", str(path))
+
+    terms = load_blocked_terms()
+    assert "secondterm" in terms
+    assert not any(term.startswith("\ufeff") for term in terms)
+    assert len(terms) == 1
 
 
 def test_moderation_blocks_promotional_text():

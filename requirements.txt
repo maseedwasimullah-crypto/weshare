@@ -1,4 +1,4 @@
-﻿# WeShare! backend dependencies.
+# WeShare! backend dependencies.
 # Pinned so a fresh install reproduces the tested environment.
 
 fastapi==0.115.12

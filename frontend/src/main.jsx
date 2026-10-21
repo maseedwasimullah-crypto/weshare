@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import './style.css'
@@ -10,7 +10,10 @@ import {
   validatePost,
 } from './validate.js'
 
-const API = '/api'
+// In development the Vite dev server proxies /api to the FastAPI backend
+// (see vite.config.js). In production set VITE_API_URL to the deployed
+// backend origin, for example https://weshare-api.onrender.com.
+const API = import.meta.env.VITE_API_URL || '/api'
 const TOKEN_KEY = 'ws_token'
 
 const getToken = () => localStorage.getItem(TOKEN_KEY)

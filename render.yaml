@@ -1,0 +1,64 @@
+# Render Blueprint for WeShare! - provisions the API and its PostgreSQL
+# database in one step.
+#
+# Deploy:  https://render.com/deploy?repo=https://github.com/maseedwasimullah-crypto/weshare
+#
+# IMPORTANT - do not set rootDir to "backend".
+# backend/app/config.py locates moderation/blocked_terms.txt relative to the
+# repository root. If the backend becomes the build root, that file falls
+# outside the build and the block list silently loads empty. The service
+# therefore builds from the repository root and changes into backend/ at run
+# time, where alembic.ini also resolves its relative script_location.
+databases:
+  - name: weshare-db
+    databaseName: weshare
+    user: weshare
+    plan: free
+    postgresMajorVersion: "18"
+
+services:
+  - type: web
+    name: weshare-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      # Render generates a random value and stores it as a secret.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_MINUTES
+        value: "30"
+      # Render injects the internal connection string. The application
+      # rewrites the plain "postgresql://" scheme to "postgresql+psycopg://".
+      - key: DATABASE_URL
+        fromDatabase:
+          name: weshare-db
+          property: connectionString
+      # Set this to the exact origin of the deployed frontend, for example
+      # https://weshare.vercel.app - no trailing slash. It is the CORS origin.
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      # SMTP is required in production: without it no account can be
+      # activated. Fill these in from your mail provider.
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_USE_TLS
+        value: "true"
+      # Never expose verification tokens in a public deployment.
+      - key: DEV_VERIFICATION_TOKENS
+        value: "false"
