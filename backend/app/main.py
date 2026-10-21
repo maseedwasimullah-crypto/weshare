@@ -35,7 +35,16 @@ LOGIN_WINDOW_SECONDS = 900
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if len(settings.secret_key) < 32:
-        raise RuntimeError("Set SECRET_KEY to at least 32 characters")
+        raise RuntimeError(
+            "SECRET_KEY must be at least 32 characters. On Render set it in "
+            "the service environment variables, or use the Blueprint value "
+            "'SECRET_KEY: generateValue: true'."
+        )
+    if not settings.frontend_origins:
+        raise RuntimeError(
+            "FRONTEND_ORIGIN must contain the exact origin of the frontend, "
+            "for example https://your-app.vercel.app"
+        )
     Base.metadata.create_all(engine)
     logger.info("WeShare API ready")
     yield
@@ -44,7 +53,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="WeShare! API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=settings.frontend_origins,
+    # Optional regular expression for preview deployments, for example
+    # r"https://weshare-.*\.vercel\.app". A regex is only used when it is set
+    # explicitly, so the default policy stays an exact origin match.
+    allow_origin_regex=settings.frontend_origin_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],

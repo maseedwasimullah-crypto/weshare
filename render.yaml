@@ -22,6 +22,9 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
+    # Runs migrations before every deploy. alembic.ini uses a relative
+    # script_location, so it has to be invoked from inside backend/.
+    preDeployCommand: cd backend && alembic -c alembic.ini upgrade head
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     autoDeployTrigger: commit
@@ -41,7 +44,12 @@ services:
           property: connectionString
       # Set this to the exact origin of the deployed frontend, for example
       # https://weshare.vercel.app - no trailing slash. It is the CORS origin.
+      # Several origins can be listed separated by commas.
       - key: FRONTEND_ORIGIN
+        sync: false
+      # Optional regular expression for preview deployments, for example
+      # https://weshare-.*\.vercel\.app . Leave empty for an exact origin only.
+      - key: FRONTEND_ORIGIN_REGEX
         sync: false
       - key: COOKIE_SECURE
         value: "true"

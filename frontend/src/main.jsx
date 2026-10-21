@@ -16,6 +16,10 @@ import {
 const API = import.meta.env.VITE_API_URL || '/api'
 const TOKEN_KEY = 'ws_token'
 
+// The API base the browser is actually using. Shown in error messages so a
+// misconfigured deployment is obvious instead of a bare "Failed to fetch".
+const API_TARGET = API.startsWith('http') ? API : `${window.location.origin}${API}`
+
 const getToken = () => localStorage.getItem(TOKEN_KEY)
 const setToken = (token) => localStorage.setItem(TOKEN_KEY, token)
 const clearToken = () => localStorage.removeItem(TOKEN_KEY)
@@ -39,11 +43,19 @@ async function call(path, options = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   }
-  const response = await fetch(API + path, {
-    ...options,
-    headers,
-    credentials: 'include',
-  })
+  let response
+  try {
+    response = await fetch(API + path, {
+      ...options,
+      headers,
+      credentials: 'include',
+    })
+  } catch {
+    throw new Error(
+      `Cannot reach the API at ${API_TARGET}. The backend may be asleep, ` +
+        'the URL may be wrong, or the server may not allow this origin (CORS).',
+    )
+  }
   let payload = null
   if (response.status !== 204) {
     const raw = await response.text()
@@ -59,7 +71,17 @@ async function call(path, options = {}) {
     if (response.status === 401 && token) {
       clearToken()
     }
-    throw new Error(describeDetail(payload && payload.detail) || `Request failed (${response.status}).`)
+    const detail = describeDetail(payload && payload.detail)
+    if (response.status === 404 && !API.startsWith('http')) {
+      // A relative API base means the frontend called its own origin. That
+      // only works behind a reverse proxy, so this is almost always a
+      // frontend that was built without VITE_API_URL.
+      throw new Error(
+        `The API was not found at ${API_TARGET}. Rebuild the frontend with ` +
+          'VITE_API_URL set to the backend origin.',
+      )
+    }
+    throw new Error(detail || `Request failed (${response.status}).`)
   }
   return payload
 }

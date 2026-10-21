@@ -2,6 +2,23 @@
 
 Minimal text-first social news sharing app. React/Vite frontend, FastAPI API, SQLAlchemy, PostgreSQL, Argon2 password hashes, signed expiring access tokens, email verification, and server-side moderation.
 
+## Not a Streamlit application
+
+This repository is **not** a Streamlit project and cannot be deployed to
+Streamlit Community Cloud. There is no `streamlit_app.py` entry point, and
+adding one would be wrong: the UI is a React single-page application and the
+API is a FastAPI application.
+
+Streamlit Community Cloud runs a Python script and serves it as a Streamlit
+app. It cannot build a Vite bundle, cannot run a long-lived ASGI server, and
+has no PostgreSQL service. A "This file does not exist" error from that
+platform therefore means the entry point is missing, not that a setting is
+wrong, and the only way to silence it would be to fake an entry point that
+discards the real application.
+
+The two parts are deployed separately instead — see
+[Deployment](#13-deployment) for the exact steps.
+
 ---
 
 ## 1. Requirements
@@ -47,7 +64,8 @@ Then edit `.env`:
 | `DATABASE_URL` | SQLAlchemy URL, e.g. `postgresql+psycopg://weshare:PASSWORD@127.0.0.1:5432/weshare` |
 | `SECRET_KEY` | Signing key for session and verification tokens. Must be **at least 32 characters** or the API refuses to start. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `ACCESS_TOKEN_MINUTES` | Session lifetime in minutes (default `30`) |
-| `FRONTEND_ORIGIN` | Exact frontend origin used for CORS, e.g. `http://localhost:5173` |
+| `FRONTEND_ORIGIN` | Exact frontend origin used for CORS, e.g. `http://localhost:5173`. Several origins can be listed separated by commas |
+| `FRONTEND_ORIGIN_REGEX` | Optional regular expression for preview deployments, e.g. `https://weshare-.*\.vercel\.app`. Leave empty for an exact-origin policy |
 | `COOKIE_SECURE` | `true` when served over HTTPS |
 | `EMAIL_*` | SMTP settings used to deliver the verification email |
 | `MODERATION_BLOCKED_TERMS_FILE` | Block list location; relative paths resolve from the project root |
@@ -259,7 +277,9 @@ PostgreSQL instance and the API web service together.
 3. Render shows the blueprint. Fill in the values marked `sync: false`:
    * `FRONTEND_ORIGIN` — the exact origin of the deployed frontend, for
      example `https://weshare.vercel.app` (no trailing slash). This is the
-     CORS origin, so it must match the browser exactly.
+     CORS origin, so it must match the browser exactly. Several origins can be
+     listed separated by commas. Leave `FRONTEND_ORIGIN_REGEX` empty unless
+     you need to allow preview deployments.
    * `EMAIL_HOST`, `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_FROM` — SMTP
      credentials. **SMTP is mandatory in production**: without it no account
      can be activated.
@@ -270,8 +290,12 @@ What the Blueprint does and why:
 * `rootDir` is deliberately left at the repository root. `backend/app/config.py`
   locates `moderation/blocked_terms.txt` relative to the repository root. If
   the backend were the build root, that file would fall outside the build and
-  the block list would silently load empty. The start command therefore
-  changes into `backend/` at run time.
+  the block list would silently load empty. The service therefore builds from
+  the repository root and changes into `backend/` at run time.
+* `preDeployCommand` runs `alembic upgrade head` before every deploy, so the
+  schema is always migrated before the new version starts serving traffic.
+  `alembic.ini` uses a relative `script_location`, so the command changes into
+  `backend/` first.
 * `SECRET_KEY` uses `generateValue: true`, so Render creates a random secret
   and stores it encrypted. The API refuses to start without a `SECRET_KEY` of
   at least 32 characters.
@@ -314,13 +338,26 @@ run from inside `backend/`:
 cd backend && alembic -c alembic.ini upgrade head
 ```
 
-Run it from the Render service **Shell** tab, or from a machine that can reach
-the database. On first boot the API also calls `Base.metadata.create_all()`,
-which creates missing tables but never alters existing ones, so run the
-migration before the first schema change.
+The Render Blueprint runs this automatically through `preDeployCommand` before
+every deploy. On any other platform run it from the service **Shell** tab, or
+from a machine that can reach the database. On first boot the API also calls
+`Base.metadata.create_all()`, which creates missing tables but never alters
+existing ones, so run the migration before the first schema change.
 
-### 13.4 Other platforms
+### 13.4 Troubleshooting a deployment
 
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `This file does not exist` on Streamlit Community Cloud | Streamlit expects a `streamlit_app.py` entry point, and this project has none because it is a React + FastAPI application | Use Render and Vercel as described above. Do not add a `streamlit_app.py` just to satisfy the form |
+| Browser console: *blocked by CORS policy* | `FRONTEND_ORIGIN` does not match the frontend origin exactly | Set it to the exact origin, no trailing slash, then redeploy the API |
+| UI: *Cannot reach the API at …* | `VITE_API_URL` was not set when the frontend was built, or the API is asleep | Set `VITE_API_URL` and rebuild/redeploy the frontend. A free Render service sleeps after inactivity; the first request then takes up to a minute |
+| UI: *The API was not found at …* | The frontend called its own origin because `VITE_API_URL` was empty | Set `VITE_API_URL` to the API origin and rebuild |
+| API log: *SECRET_KEY must be at least 32 characters* | `SECRET_KEY` is missing or too short | Set it, or use `generateValue: true` in the Blueprint |
+| API log: *FRONTEND_ORIGIN must contain the exact origin* | `FRONTEND_ORIGIN` is empty | Set it to the deployed frontend origin |
+| API log: *No module named psycopg2* | A plain `postgresql://` URL reached SQLAlchemy | Already handled: the scheme is rewritten to `postgresql+psycopg://` |
+| API 500 on a missing table | Migrations never ran | Run `cd backend && alembic -c alembic.ini upgrade head` |
+
+### 13.5 Other platforms
 The backend needs a long-lived ASGI server, a migration step and a reachable
 PostgreSQL, so it suits Render, Fly.io, Railway, Azure App Service, Google
 Cloud Run, AWS App Runner or ECS Fargate, and DigitalOcean App Platform.
@@ -330,7 +367,7 @@ Netlify Functions, Cloudflare Workers) are a poor fit.
 The frontend is a static build and suits Vercel, Netlify, Cloudflare Pages,
 Render Static Sites, AWS S3 + CloudFront, or GitHub Pages at a root domain.
 
-### 13.5 Production checklist
+### 13.6 Production checklist
 
 * HTTPS everywhere and `COOKIE_SECURE=true`.
 * `DEV_VERIFICATION_TOKENS=false` and working SMTP. Both together are

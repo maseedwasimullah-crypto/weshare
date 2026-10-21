@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     secret_key: str = ""
     access_token_minutes: int = 30
     frontend_origin: str = "http://localhost:5173"
+    frontend_origin_regex: str = ""
     cookie_secure: bool = False
     email_host: str = ""
     email_port: int = 587
@@ -41,6 +42,18 @@ class Settings(BaseSettings):
             if value.startswith(prefix):
                 return "postgresql+psycopg://" + value[len(prefix) :]
         return value
+
+    @property
+    def frontend_origins(self) -> list[str]:
+        """The exact browser origins allowed to call the API.
+
+        ``FRONTEND_ORIGIN`` may list several origins separated by commas, so a
+        production deployment can allow a stable domain and a preview
+        deployment at the same time. Blank entries are dropped so an empty
+        value can never widen the policy to "any origin".
+        """
+        origins = (origin.strip() for origin in self.frontend_origin.split(","))
+        return [origin.rstrip("/") for origin in origins if origin]
 
     @property
     def blocked_terms_path(self) -> Path:

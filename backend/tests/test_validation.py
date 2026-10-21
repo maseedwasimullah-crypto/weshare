@@ -30,6 +30,37 @@ def test_database_url_keeps_an_explicit_driver():
     )
 
 
+def test_frontend_origins_accepts_a_comma_separated_list():
+    settings = Settings(frontend_origin="https://a.example, https://b.example/")
+    assert settings.frontend_origins == ["https://a.example", "https://b.example"]
+
+
+def test_frontend_origins_ignores_blank_entries():
+    """An empty entry must not turn into a wildcard origin."""
+    assert Settings(frontend_origin="").frontend_origins == []
+    assert Settings(frontend_origin="  ,  ").frontend_origins == []
+    assert Settings(frontend_origin="https://a.example,").frontend_origins == [
+        "https://a.example"
+    ]
+
+
+def test_cors_allows_the_configured_origin(client):
+    origin = {"Origin": "http://localhost:5173"}
+    response = client.get("/api/health", headers=origin)
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+def test_cors_preflight_rejects_an_unknown_origin(client):
+    response = client.options(
+        "/api/auth/login",
+        headers={
+            "Origin": "https://evil.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_text_validation():
     validate_text("Two lines\nremain readable.", 1000)
     for value in ("", "   ", "first\n\nsecond", "x" * 1001):
