@@ -2,6 +2,8 @@
 
 Minimal text-first social news sharing app. React/Vite frontend, FastAPI API, SQLAlchemy, PostgreSQL, Argon2 password hashes, signed expiring access tokens, email verification, and server-side moderation.
 
+[![CI](https://github.com/maseedwasimullah-crypto/weshare/actions/workflows/ci.yml/badge.svg)](https://github.com/maseedwasimullah-crypto/weshare/actions/workflows/ci.yml)
+
 ## Not a Streamlit application
 
 This repository is **not** a Streamlit project and cannot be deployed to
@@ -251,6 +253,21 @@ Frontend validation tests:
 cd frontend
 npm test
 ```
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+| Job | What it does |
+| --- | --- |
+| `backend` | Backend suite on SQLite (Python 3.12) |
+| `backend-postgres` | Backend suite against a PostgreSQL 18 service container |
+| `frontend` | `npm test` and `npm run build` on Node 20.19 and 24 |
+| `secrets` | Fails if a `.env` file is tracked or a credential pattern appears in the git history |
+
+The `secrets` job is a guard against the most damaging mistake this project
+could make: committing a real `.env`. It never has access to the secrets
+themselves, only to the file names and patterns in the history.
 
 ## 13. Deployment
 
